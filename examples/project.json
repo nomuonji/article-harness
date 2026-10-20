@@ -1,0 +1,8 @@
+{
+  "repo": "/absolute/path/to/your/site",
+  "inventory": ["src/content/blog/article-a.md", "src/content/blog/article-b.md"],
+  "brief": "公開記事の具体的な誤り・不足回答を原典と照合し、読者の判断に役立つ改稿だけを計画する。字数や件数を増やすことを目的にしない。",
+  "sources": ["https://replace-with-an-actual-primary-source.example/"],
+  "policy_files": ["AGENTS.md"],
+  "coordination": {"mode": "unmanaged"}
+}

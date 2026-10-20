@@ -1,0 +1,11 @@
+{
+  "id": "correct-one-article",
+  "repo": "/absolute/path/to/your/site",
+  "files": ["src/content/blog/article-a.md"],
+  "brief": "実際に確認した欠陥・修正する箇所・残すURLをここに記載する。",
+  "reader_job": "この記事を読む人が何を判断できるようになるかを記載する。",
+  "acceptance_criteria": ["重要な主張と適用条件が原典で確認でき、本文・要約・FAQに矛盾が残らない"],
+  "sources": ["https://replace-with-an-actual-primary-source.example/"],
+  "policy_files": ["AGENTS.md"],
+  "coordination": {"mode": "unmanaged"}
+}
