@@ -143,6 +143,22 @@ class HarnessIntegrationTests(unittest.TestCase):
         self.assertEqual({r['status'] for r in rows.values()}, {'ready_for_handoff'}, rows)
         self.assertEqual(runner.max_by_repo[str(repo)], 1)
 
+    def test_proposal_only_preserves_review_without_authorizing_delivery(self):
+        repo = self.repo('safe-proposal')
+        task = self.task('safe-proposal', repo)
+        task['coordination'] = {'mode': 'proposal-only'}
+        self.store.add(task)
+        rows = self.run_controller(FakeRunner())
+        self.assertEqual(rows['safe-proposal']['status'], 'reviewed_proposal')
+        receipt = json.loads((self.store.root / 'tasks/safe-proposal/receipt.json').read_text())
+        self.assertEqual(receipt['status'], 'reviewed_proposal')
+        self.assertEqual(receipt['publication'], 'not_run')
+        self.assertEqual((repo / 'article.md').read_text(),
+                         '# Article\nOriginal incomplete answer\n')
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(['--state', str(self.store.root),
+                                       'ack-applied', 'safe-proposal']), 1)
+
     def test_editorial_revise_is_returned_to_worker_then_rechecked(self):
         self.store.add(self.task('revise', self.repo('revise')))
         runner = FakeRunner({'revise': 'revise-once'})
