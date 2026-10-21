@@ -3,7 +3,11 @@
 set -euo pipefail
 HARNESS_ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$HARNESS_ROOT"
-if ! command -v codex >/dev/null 2>&1; then
+DRY_RUN=0
+for arg in "$@"; do
+  if [ "$arg" = "--dry-run" ]; then DRY_RUN=1; fi
+done
+if [ "$DRY_RUN" -eq 0 ] && ! command -v codex >/dev/null 2>&1; then
   echo 'Codex CLI is not on PATH in this WSL shell. Run codex login or fix your shell PATH.' >&2
   exit 1
 fi
