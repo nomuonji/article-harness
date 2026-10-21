@@ -17,6 +17,8 @@
 
 ## 起動
 
+通常は[Operator最小連携](MINIMAL_OPERATORS.md)を使う。`proposal-only`ならGitHubとSQLiteだけで改稿・審査でき、合格は`reviewed_proposal`。実配送する候補にだけ実共有claimを接続する。記事品質は同梱の`skills/editorial-quality.md`を読み、毎記事のMy Portal取得を避ける。
+
 My Portal Chat Skill **`article-harness-native`**がチャットでの起動手順の正本。My Portalへの保存は、ChatGPTのSkills一覧へインストールする操作ではない。新しい会話ではWorld Homeから同Skillを取得し、「並列記事改善モードを開始」と明示する。
 
 コードはPython 3.11以上の標準ライブラリのみ。クラウド実行でもCLI本体、APIキー、ローカルPCの常時稼働は不要。ただしPython実行とサブエージェント起動がその環境に存在する必要がある。起動時に確認し、存在しなければ実行済みと報告しない。
@@ -30,14 +32,14 @@ python3 -m article_harness.native --help
 ## 作業ループ
 
 1. 親が対象サイトの編集方針と現行本文を読む。GitHubなら**正確なcommit SHA**で対象ファイルを取得し、originalディレクトリへ保存する。MCPの有無・読み取り/書き込み・commit readback・スクリプト実行・サブエージェント起動を確認する。
-2. 管理下サイトは、既存SEO Taskのclaimなど実際に定期側が尊重する共有予約を取得する。native helperのローカルロックは定期Workerとの共有ロックではない。共有予約が取れなければ、元repoへ書き込まず、独立した調査/提案/fixture試験を行う。
+2. 通常は`proposal-only`で独立候補を作成する。実配送時だけ正本の共有予約を取得する。ローカルロックは定期Workerとの共有ロックではない。共有予約が取れなくても、元repoへ書かず候補の改稿・審査・保存を継続できる。
 3. 具体的な欠陥、読者の問い、原典、変更可能ファイル、合格条件、base SHAを持つタスクだけ登録する。
 4. 親がclaimし、実際のWorkerをspawnして、Taskの最小情報・original・候補出力先を渡す。初期値3枠。同じrepoの作業を重ねない。
 5. Workerはcandidateディレクトリにだけ改稿を書く。元repo、Taskの合格条件、snapshot、他のWorkerのファイルを変更しない。
 6. 親がsubmitして候補を固定する。補助コードがallowlist、原文、差分、ハッシュを記録する。
 7. Workerとは別の新規Reviewerをspawnする。独立した原典確認・改稿前後・全文・要約等を審査し、固定した合格条件すべてを支持/不支持/不明で返す。自分の前の出力を正当化する指示や期待する結論を渡さない。
 8. reviseなら理由を同Taskへ戻す。初回+最大2回の改稿を上限とし、保留になっても他の仕事へ進む。passでも機械的なハッシュ確認が通るまで引き渡さない。
-9. `ready_for_handoff`の実物を親が確認し、現在の環境で許可された配送だけを行う。既存SEO Taskならその正本のcheckpoint/transport/中央Actions所有権を守る。未管理の独立作業はユーザーが許可したbranch/PR操作の範囲で配送する。ツール不足なら成果物を保存して未配送と報告する。
+9. `reviewed_proposal`は候補完成で未配送。管理下repoへ反映する時だけ共有claimを`authorize-delivery`へ渡し、`ready_for_handoff`に進める。既存SEO Taskのcheckpoint/transport/中央Actions所有権を守る。未管理の独立作業はユーザーが許可したbranch/PR操作の範囲で配送する。ツール不足なら候補を保存して他の記事を進める。
 10. 空き枠に次を投入する。起動しただけ、差分を作っただけ、mainに入っただけ、公開済み、検索成果をそれぞれ区別する。セッション終了前や重要なcheckpointでexportを保存する。
 
 ## GitHub MCPの扱い

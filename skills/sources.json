@@ -1,0 +1,12 @@
+{
+  "skills": [
+    {
+      "id": "editorial-quality",
+      "revision": 1,
+      "source": "My Portal chatSkills DB",
+      "sourceUpdatedAt": "2026-10-20T08:37:13.834Z",
+      "path": "skills/editorial-quality.md",
+      "refresh": "explicit only; never per task"
+    }
+  ]
+}

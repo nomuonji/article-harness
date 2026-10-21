@@ -2,6 +2,8 @@
 
 ## ChatGPT Work / Codex Cloudで使う
 
+通常の計画・改稿・審査は**Site/Keywords Operator呼出しゼロ**。同梱スキルとSQLiteを使い、管理下サイトへの実配送時だけ共有claimを接続する。[Operator最小連携](docs/MINIMAL_OPERATORS.md)を参照。
+
 クラウド用の**Nativeモード**を追加。親が環境内のサブエージェントを起動し、Python補助コードで予約・成果物固定・審査・再開を管理する。Codex CLIの入れ子起動は不要。
 
 起動は[Native親エージェント手順](docs/native-parent-prompt.md)を読み、対象サイトと許可範囲を指定して「並列記事改善モードを開始」。My Portal接続済みならChat Skill `article-harness-native`を取得する。[構成と境界](docs/NATIVE_MODE.md)も参照。コード正本は独立repo `nomuonji/article-harness`。
