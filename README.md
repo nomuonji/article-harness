@@ -134,3 +134,5 @@ python3 -m unittest discover -s tests -v
 統合テストは一時repoと模擬実行者を使用する。実モデルの編集品質と、本番サイトの改善効果は別途検証が必要。
 
 Codex接続方式は公式の[非対話実行](https://developers.openai.com/codex/noninteractive)と[CLIリファレンス](https://developers.openai.com/codex/cli/reference)に基づく。`exec`、JSON schema、最終回答ファイル、sandboxを利用する。
+
+Nativeの配送は`prepare-delivery` / `check-delivery` / `handoff`でGitHubの原文・競合PR・配送commitの本文を機械照合します。[配送手順と限界](docs/DELIVERY.md)。自由記述のreadbackだけでは完了できません。
