@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      STATE_DIR: ${{ runner.temp }}/article-harness-state
+      STATE_DIR: /tmp/article-harness-state
       SITE_DIR: ${{ github.workspace }}/managed-site
       MODEL: ${{ vars.ARTICLE_HARNESS_MODEL }}
 
