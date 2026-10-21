@@ -82,6 +82,15 @@ class LocalContinuousTests(unittest.TestCase):
                 with self.assertRaises(HarnessError):
                     supervise(**self.opts(dry_run=True))
 
+    def test_previous_state_cannot_be_reused_for_another_site(self):
+        self.state.mkdir()
+        (self.state / 'local-owner.json').write_text(
+            json.dumps({'project': 'different', 'repo': str(self.repo.resolve())}),
+            encoding='utf-8')
+        with patch('article_harness.local.shutil.which', return_value='/bin/true'):
+            with self.assertRaises(ContinuityError):
+                supervise(**self.opts(dry_run=True))
+
     def test_managed_repo_cannot_use_automatic_unmanaged_mode(self):
         self.settings['coordination'] = {'mode': 'unmanaged'}
         self.template.write_text(json.dumps(self.settings), encoding='utf-8')
