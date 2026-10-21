@@ -91,6 +91,17 @@ def supervise(*, template: Path, repo: Path, state: Path, runner: str = 'codex',
     stopped = stop_event or threading.Event()
     sleep = sleep or stopped.wait
     with file_lock(state / 'local-supervisor.lock'):
+        owner_file = state / 'local-owner.json'
+        owner = {'project': project, 'repo': str(repo)}
+        if owner_file.exists():
+            if json.loads(owner_file.read_text(encoding='utf-8')) != owner:
+                raise ContinuityError('State belongs to another project or checkout')
+        else:
+            for row in Store(state).rows():
+                task = json.loads(row['spec'])
+                if task.get('repo') != str(repo):
+                    raise ContinuityError('Existing tasks belong to another checkout')
+            atomic_json(owner_file, owner)
         if (state / 'STOP').exists():
             print('STOP exists; use python -m article_harness --state STATE clear-stop before restarting')
             return 0
