@@ -116,7 +116,7 @@ class NativeStore:
         return self.root / 'tasks' / task_id
 
     def _shared(self, task, receipt, seconds=0):
-        if task['coordination']['mode'] == 'unmanaged':
+        if task['coordination']['mode'] in ('unmanaged', 'proposal-only'):
             return
         if not isinstance(receipt, dict) or receipt.get('taskId') != task['id'] or receipt.get('repository') != task['repository']:
             raise NativeError('Shared claim must match this task and repository')
@@ -146,8 +146,8 @@ class NativeStore:
         if type(maximum) is not int or not 0 <= maximum <= 10:
             raise NativeError('max_revisions must be 0..10')
         mode = task.get('coordination', {}).get('mode')
-        if mode not in ('unmanaged', 'shared-claim'):
-            raise NativeError('Explicit unmanaged or shared-claim coordination required')
+        if mode not in ('unmanaged', 'shared-claim', 'proposal-only'):
+            raise NativeError('Explicit unmanaged, shared-claim or proposal-only coordination required')
         receipt = task['coordination'].get('receipt')
         self._shared(task, receipt)
         original = {name: _bytes(original_dir, name) for name in task['files']}
@@ -245,9 +245,9 @@ class NativeStore:
         with self._tx() as db:
             row = self._row(db, task_id)
             task = json.loads(row['spec'])
-            if task['coordination']['mode'] != 'shared-claim':
+            if task['coordination']['mode'] != 'shared-claim' and not (task['coordination']['mode'] == 'proposal-only' and row['status'] == 'ready_for_handoff'):
                 raise NativeError('Task does not use external shared coordination')
-            self._shared(task, receipt)
+            self._shared(dict(task, coordination={'mode': 'shared-claim'}), receipt)
             previous = json.loads(row['shared_receipt'])
             if receipt['runId'] != previous['runId']:
                 raise NativeError('Cannot replace an unresolved shared claim with another run')
@@ -341,7 +341,8 @@ class NativeStore:
                 raise NativeError('Unknown, failed or defective work cannot pass')
             if verdict == 'revise' and not findings:
                 raise NativeError('Revision requires concrete findings')
-            status = 'ready_for_handoff' if verdict == 'pass' else 'queued' if verdict == 'revise' and row['attempt'] <= task['max_revisions'] else 'blocked'
+            passed = 'reviewed_proposal' if task['coordination']['mode'] == 'proposal-only' else 'ready_for_handoff'
+            status = passed if verdict == 'pass' else 'queued' if verdict == 'revise' and row['attempt'] <= task['max_revisions'] else 'blocked'
             feedback = json.loads(row['feedback']) + [dict(report, reviewer=row['actor'], checked_at=_stamp())]
             _write(self._task_dir(task_id) / 'versions' / str(row['attempt']) / 'review.json', _json(feedback[-1]).encode())
             db.execute('UPDATE tasks SET status=?,token=NULL,expires=NULL,feedback=?,detail=?,updated=? WHERE id=?', (status, _json(feedback), report['summary'], time.time(), task_id))
@@ -373,12 +374,35 @@ class NativeStore:
             db.execute('UPDATE tasks SET status=?,actor=NULL,token=NULL,expires=NULL,detail=?,updated=? WHERE id=?', (status, 'Parent explicitly reconciled checkpoint and resumed', time.time(), task_id))
             return self._public(self._row(db, task_id))
 
+    def authorize_delivery(self, task_id, receipt):
+        """Attach an actual shared claim only when a reviewed proposal is delivered.
+
+        The parent verifies the remote claim and current GitHub HEAD. This helper
+        validates scope/expiry but never calls an Operator or invents a claim.
+        """
+        with self._tx() as db:
+            row = self._row(db, task_id)
+            task = json.loads(row['spec'])
+            if row['status'] != 'reviewed_proposal' or task['coordination']['mode'] != 'proposal-only':
+                raise NativeError('Only an independently reviewed proposal may authorize delivery')
+            self._verify_snapshot(row)
+            scoped = dict(task, coordination={'mode': 'shared-claim'})
+            self._shared(scoped, receipt)
+            for other in db.execute("SELECT id,spec FROM tasks WHERE id!=? AND status IN ('working','awaiting_review','reviewing','ready_for_handoff','interrupted')", (task_id,)):
+                if json.loads(other['spec'])['repository'].lower() == task['repository'].lower():
+                    raise NativeError('Another task currently owns this repository')
+            db.execute("UPDATE tasks SET status='ready_for_handoff',shared_receipt=?,updated=? WHERE id=?", (_json(receipt), time.time(), task_id))
+            return self._public(self._row(db, task_id))
+
     def handoff(self, task_id, digest, evidence):
         with self._tx() as db:
             row = self._row(db, task_id)
             if row['status'] != 'ready_for_handoff' or digest != row['digest']:
                 raise NativeError('Only the exact independently reviewed artifact may be handed off')
             self._verify_snapshot(row)
+            task = json.loads(row['spec'])
+            if task['coordination']['mode'] == 'proposal-only':
+                self._shared(dict(task, coordination={'mode': 'shared-claim'}), json.loads(row['shared_receipt']) if row['shared_receipt'] else None)
             if not isinstance(evidence, dict) or not re.fullmatch(r'[a-fA-F0-9]{40}', evidence.get('commit_sha', '')) or not isinstance(evidence.get('readback'), str) or not evidence['readback'].strip():
                 raise NativeError('Observed commit SHA and actual readback evidence are required')
             _write(self._task_dir(task_id) / 'handoff.json', _json(dict(evidence, digest=digest, recorded_at=_stamp(), publication='unverified')).encode())
@@ -452,7 +476,7 @@ class NativeStore:
                             raise NativeError('Restored original does not match immutable task')
                     if row['digest'] and (store._task_dir(row['id']) / 'versions' / str(row['attempt'])).exists():
                         store._verify_snapshot(row)
-                    elif row['status'] in ('awaiting_review', 'reviewing', 'ready_for_handoff', 'handed_off'):
+                    elif row['status'] in ('awaiting_review', 'reviewing', 'reviewed_proposal', 'ready_for_handoff', 'handed_off'):
                         raise NativeError('Restored reviewed snapshot is missing')
                     versions = store._task_dir(row['id']) / 'versions'
                     for version in versions.iterdir() if versions.exists() else []:
@@ -494,6 +518,7 @@ def main(argv=None):
     p = commands.add_parser('refuse'); p.add_argument('--id', required=True); p.add_argument('--token', required=True); p.add_argument('--reason', required=True)
     p = commands.add_parser('resume'); p.add_argument('--id', required=True)
     p = commands.add_parser('renew-shared-claim'); p.add_argument('--id', required=True); p.add_argument('--receipt', required=True)
+    p = commands.add_parser('authorize-delivery'); p.add_argument('--id', required=True); p.add_argument('--receipt', required=True)
     p = commands.add_parser('handoff'); p.add_argument('--id', required=True); p.add_argument('--digest', required=True); p.add_argument('--evidence', required=True)
     commands.add_parser('status')
     p = commands.add_parser('export'); p.add_argument('--output')
@@ -517,6 +542,7 @@ def main(argv=None):
         elif cmd == 'review': result = store.review(args.id, args.token, load(args.report))
         elif cmd == 'resume': result = store.resume(args.id)
         elif cmd == 'renew-shared-claim': result = store.renew_shared_claim(args.id, load(args.receipt))
+        elif cmd == 'authorize-delivery': result = store.authorize_delivery(args.id, load(args.receipt))
         elif cmd == 'handoff': result = store.handoff(args.id, args.digest, load(args.evidence))
         elif cmd == 'stop-task': result = store.stop_task(args.id, args.token, args.reason, args.refused)
         elif cmd == 'refuse': result = store.refuse(args.id, args.token, args.reason)

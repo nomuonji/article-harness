@@ -70,6 +70,48 @@ class NativeStoreTests(unittest.TestCase):
             self.store.claim('third', 'worker-three')
         self.assertEqual(2, sum(x['status'] == 'working' for x in self.store.list()))
 
+    def test_proposals_finish_offline_and_release_repo_for_other_articles(self):
+        task = self.spec(coordination={'mode': 'proposal-only'})
+        submitted = self.submitted(task)
+        reviewer = self.store.begin_review('article', 'independent-reviewer')
+        result = self.store.review('article', reviewer['token'], self.report(submitted))
+        self.assertEqual('reviewed_proposal', result['status'])
+        self.add(self.spec('next', files=['docs/next.md'], coordination={'mode': 'proposal-only'}))
+        self.store.claim('next', 'next-worker')
+        with self.assertRaises(NativeError):
+            self.store.handoff('article', submitted['digest'], {'commit_sha': 'b' * 40, 'readback': 'Observed'})
+        archive = self.root / 'proposals.zip'
+        self.store.export(archive)
+        restored = NativeStore.restore(archive, self.root / 'restored-proposals')
+        self.assertEqual('reviewed_proposal', next(x for x in restored.list() if x['id'] == 'article')['status'])
+
+    def test_proposal_delivery_requires_scoped_live_claim_and_can_renew(self):
+        import datetime as dt
+        task = self.spec(coordination={'mode': 'proposal-only'})
+        submitted = self.submitted(task)
+        reviewer = self.store.begin_review('article', 'independent-reviewer')
+        self.store.review('article', reviewer['token'], self.report(submitted))
+        receipt = {'taskId': 'article', 'repository': 'owner/repo', 'files': ['docs/article.md'],
+                   'runId': 'verified-remote-run', 'expiresAt': dt.datetime.fromtimestamp(self.now.return_value + 1200, dt.timezone.utc).isoformat()}
+        with self.assertRaises(NativeError):
+            self.store.authorize_delivery('article', dict(receipt, files=['docs/other.md']))
+        self.assertEqual('ready_for_handoff', self.store.authorize_delivery('article', receipt)['status'])
+        renewed = dict(receipt, expiresAt=dt.datetime.fromtimestamp(self.now.return_value + 2400, dt.timezone.utc).isoformat())
+        self.store.renew_shared_claim('article', renewed)
+        self.assertEqual('handed_off', self.store.handoff('article', submitted['digest'], {'commit_sha': 'b' * 40, 'readback': 'Verified source body at commit'})['status'])
+
+    def test_proposal_delivery_blocks_after_external_claim_expires(self):
+        import datetime as dt
+        submitted = self.submitted(self.spec(coordination={'mode': 'proposal-only'}))
+        lease = self.store.begin_review('article', 'reviewer')
+        self.store.review('article', lease['token'], self.report(submitted))
+        receipt = {'taskId': 'article', 'repository': 'owner/repo', 'files': ['docs/article.md'],
+                   'runId': 'verified-run', 'expiresAt': dt.datetime.fromtimestamp(self.now.return_value + 10, dt.timezone.utc).isoformat()}
+        self.store.authorize_delivery('article', receipt)
+        self.now.return_value += 11
+        with self.assertRaises(NativeError):
+            self.store.handoff('article', submitted['digest'], {'commit_sha': 'b' * 40, 'readback': 'Cannot invent a renewed lease'})
+
     def test_expiry_cannot_submit_or_automatically_reclaim(self):
         self.add()
         lease = self.store.claim('article', 'worker', ttl=5)

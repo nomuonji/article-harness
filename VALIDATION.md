@@ -1,5 +1,7 @@
 # Validation — 2026-10-21 JST / v0.2
 
+- Operator-minimal update: **54 tests passed**. Three added behavior tests cover offline reviewed proposals releasing a repository for the next article, just-in-time scoped delivery claims with renewal, and expired-claim rejection at handoff. The underlying Operator databases and schedules were not migrated or changed.
+
 - Full suite: **51 passed** (23 local orchestration + 8 Codex subprocess adapter + 20 native state/artifact integration).
 - Actual ChatGPT Work native Worker and separate Reviewer completed a fictional source-based article repair. The real review covered all three fixed criteria and passed; native state reached `ready_for_handoff`, exported to ZIP and restored with the same digest/status. Artifact packet: `examples/native-fixture/`.
 - Native mode does not require or spawn Codex CLI. Codex Cloud product execution remains untested; runtime-specific subagent/MCP capabilities must be checked there. Real Site Operator shared claims and production article delivery are not tested by the fixture.
