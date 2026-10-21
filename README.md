@@ -1,5 +1,12 @@
 # Article Harness 0.2
 
+## 継続運転（GitHub Actions・試験版）
+
+6時間ごとの再起動、記事候補の自動選定、改稿・独立審査、状態の安全な保存と復元を実装した。
+**既定OFF**、OpenAI APIの従量課金キーが必要。現段階は管理下サイトへの無断反映を避けるため
+`proposal-only`（候補作成のみ）で、Site Operatorへの本番配送連携は未完了。
+設定・状態確認は [継続運転マニュアル](docs/CONTINUOUS.md) を参照。
+
 ## ChatGPT Work / Codex Cloudで使う
 
 通常の計画・改稿・審査は**Site/Keywords Operator呼出しゼロ**。同梱スキルとSQLiteを使い、管理下サイトへの実配送時だけ共有claimを接続する。[Operator最小連携](docs/MINIMAL_OPERATORS.md)を参照。
