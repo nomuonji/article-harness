@@ -62,6 +62,40 @@ class ContinuityTests(unittest.TestCase):
             restore(self.archive, self.root / 'restored', 'qualification-pilot')
         self.assertFalse((self.root / 'escape').exists())
 
+    def test_prepares_only_unreserved_tracked_articles(self):
+        import subprocess
+        from article_harness.continuity import prepare_project
+        repo = self.root / 'site'
+        repo.mkdir()
+        subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
+        subprocess.run(['git', '-C', str(repo), 'config', 'user.email', 'test@example.invalid'], check=True)
+        subprocess.run(['git', '-C', str(repo), 'config', 'user.name', 'Test'], check=True)
+        (repo / 'docs').mkdir()
+        for name in ('a.md', 'b.md', 'c.mdx'):
+            (repo / 'docs' / name).write_text('# Article', encoding='utf-8')
+        (repo / 'ignored.md').write_text('# Not an article', encoding='utf-8')
+        subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(repo), 'commit', '-qm', 'fixture'], check=True)
+        task = {
+            'id': 'reserved-one', 'repo': str(repo.resolve()), 'files': ['docs/a.md'],
+            'brief': 'Reader decision', 'reader_job': 'Decide what to choose',
+            'acceptance_criteria': ['Verified comparison'],
+            'sources': ['https://example.org/source'],
+            'coordination': {'mode': 'proposal-only'},
+        }
+        Store(self.state).add(task)
+        cfg = {'id': 'qualification-pilot', 'article_globs': ['docs/*.md', 'docs/*.mdx'],
+               'brief': 'Check actual reader benefits', 'sources': ['https://example.org/source'],
+               'policy_files': [], 'coordination': {'mode': 'proposal-only'}}
+        template = self.root / 'template.json'
+        template.write_text(json.dumps(cfg), encoding='utf-8')
+        output = self.root / 'project.json'
+        result = prepare_project(template, repo, self.state, output, 'qualification-pilot', 10)
+        selected = json.loads(output.read_text())['inventory']
+        self.assertEqual(result['eligible'], 2)
+        self.assertEqual(set(selected), {'docs/b.md', 'docs/c.mdx'})
+        self.assertEqual(result['previously_reserved'], 1)
+
     def test_rejects_symlink_in_state(self):
         (self.state / 'tasks/link').symlink_to(self.root)
         with self.assertRaises(ContinuityError):
