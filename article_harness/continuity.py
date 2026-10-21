@@ -163,7 +163,7 @@ def prepare_project(template: Path, repo: Path, state: Path, output: Path,
     # roots (e.g. "*") or GitHub/workflow/policy files by accident.
     if (not isinstance(patterns, list) or not patterns or any(
             not isinstance(p, str) or '/' not in p or p.startswith(('/', '.'))
-            or '\\\\' in p or '..' in p.split('/')
+            or '\\' in p or '..' in p.split('/')
             or p.split('/')[0].startswith(('*', '?', '['))
             for p in patterns)):
         raise ContinuityError('article_globs must specify an explicit content directory')
