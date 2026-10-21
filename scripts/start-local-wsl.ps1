@@ -23,8 +23,9 @@ if ($Workers -lt 1 -or $Workers -gt 6 -or $MaxJobs -lt 1 -or $IntervalMinutes -l
 }
 $wslArgs = @()
 if ($Distro) { $wslArgs += @('--distribution', $Distro) }
-$wslArgs += @('--cd', $HarnessPath, '--exec', 'bash',
-              'scripts/run-local.sh', '--repo', $SitePath,
+$wslArgs += @('--cd', $HarnessPath, '--exec', 'bash', '-lic',
+              'exec bash scripts/run-local.sh "$@"', 'article-harness-local',
+              '--repo', $SitePath,
               '--state', $StatePath,
               '--workers', "$Workers", '--max-jobs', "$MaxJobs",
               '--interval-minutes', "$IntervalMinutes")
