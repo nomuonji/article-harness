@@ -154,7 +154,7 @@ class HarnessIntegrationTests(unittest.TestCase):
         self.assertEqual(receipt['status'], 'reviewed_proposal')
         self.assertEqual(receipt['publication'], 'not_run')
         self.assertEqual((repo / 'article.md').read_text(),
-                         '# Article\\nOriginal incomplete answer\\n')
+                         '# Article\nOriginal incomplete answer\n')
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(cli.main(['--state', str(self.store.root),
                                        'ack-applied', 'safe-proposal']), 1)
