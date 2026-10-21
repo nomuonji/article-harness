@@ -10,6 +10,13 @@
 - `python3 examples/demo.py --output <fresh-directory>`: offline simulation, 4 tasks across 4 fixture repositories; 3 ready_for_handoff, 1 blocked; one task revised and reviewed a second time. Source checkouts remained unchanged.
 - Codex CLI is not installed in the build environment. Adapter tests launch a fake executable and verify arguments, stdin, schema/output handling, role sandboxes, timeout and process-group cleanup. They do not prove live Codex authentication or editorial quality.
 - Read-only independent code review found reservation checkpoint loss, inside-repo default state, mutable worktree acknowledgement, and applied-item planning exclusion issues. These were corrected and covered by regression tests.
-- No scheduled jobs, managed sites, external reservations, production code or publication settings were changed. Actual Site Operator reservation/delivery adapters are not implemented in this version.
+- No scheduled jobs, managed sites, external reservations or publication settings were changed. Actual Site Operator reservation/writing adapters remain parent-owned. Native GitHub delivery readback is implemented separately (see below).
 
 The deliverable includes a local CLI controller and a native-subagent state/artifact helper with parent instructions. It is not a deployed continuous service, and reviewed artifacts are not published articles.
+
+## Native GitHub delivery verification
+
+- 65 tests pass, including remote original mismatch, stale article, unrelated HEAD changes, overlapping/renamed PR files, unexpected additions/deletions/modes, wrong commit parent/body, blob integrity, truncated trees, HTTP 429, expired claims during slow reads, and continued draft work beside pending delivery.
+- Independent code review found claim revalidation after remote HEAD reads and accepted-uppercase-SHA compatibility issues; both fixed with regression tests.
+- Live unauthenticated official GitHub REST reads succeeded for main commit `16ba5ef3af4590290ad433bdae43f00ca862a9c7`, tree `fb93d930da538325441fe135f95d8752ea299ca8`, and README blob integrity (10,526 bytes).
+- Managed-site live delivery remains untested: `seo_agent_context({role: 'executor'})` returned `INVALID_ARGUMENT`, so no shared claim was assumed or managed article published.

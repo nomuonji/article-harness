@@ -15,9 +15,9 @@
 
 管理下または管理状態不明のサイトは`coordination: {"mode":"proposal-only"}`で登録する。元repoへ書かずローカル候補を改稿して独立審査する。合格は`reviewed_proposal`。別記事へ枠を再利用でき、Operatorの429でもここまで継続できる。別実行者と調査や候補作成が重複する可能性はあるため、公開前に最新本文・重複PRを確認する。
 
-管理下repoへ反映する時だけ親が正本の共有claimと現在HEAD・対象パス・期限・runIdをreadbackし、`native authorize-delivery --id TASK_ID --receipt actual-claim.json`へ渡す。成功すると`ready_for_handoff`となり、引き渡しまでrepo排他される。元Task IDとローカルTask IDが異なる場合は対応も記録する。helperは入力検査のみで遠隔権限を認証しない。架空receiptで代用しない。
+管理下repoへ反映する時だけ親が正本の共有claimと現在HEAD・対象パス・期限・runIdをreadbackし、`native authorize-delivery --id TASK_ID --receipt actual-claim.json`へ渡す。成功すると`ready_for_handoff`となり、別配送とは排他されるが、同repoの別記事のproposal-only候補作成は継続できる。元Task IDとローカルTask IDが異なる場合は対応も記録する。helperは入力検査のみで遠隔権限を認証しない。架空receiptで代用しない。
 
-延長が必要なら正本で延長/readback後に`renew-shared-claim`。配送後だけ実commitとreadbackを`handoff`に記録する。期限切れ・Operator不通・元HEAD変化は配送だけ保留し、他の記事を進める。従来の`shared-claim`も維持する。
+延長が必要なら正本で延長/readback後に`renew-shared-claim`。配送前は`prepare-delivery`でGitHubのopen PR・原文を確認し、書込直前に`check-delivery`でHEADを確認する。配送後は`handoff`がGitHubのcommit・tree・blobを直接照合する。詳しくは[配送検証](DELIVERY.md)。期限切れ・Operator不通・元HEAD変化は配送だけ保留し、他の記事を進める。従来の`shared-claim`も維持する。
 
 ## スキルと境界
 

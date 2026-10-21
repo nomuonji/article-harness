@@ -42,6 +42,10 @@ python3 -m article_harness.native --help
 9. `reviewed_proposal`は候補完成で未配送。管理下repoへ反映する時だけ共有claimを`authorize-delivery`へ渡し、`ready_for_handoff`に進める。既存SEO Taskのcheckpoint/transport/中央Actions所有権を守る。未管理の独立作業はユーザーが許可したbranch/PR操作の範囲で配送する。ツール不足なら候補を保存して他の記事を進める。
 10. 空き枠に次を投入する。起動しただけ、差分を作っただけ、mainに入っただけ、公開済み、検索成果をそれぞれ区別する。セッション終了前や重要なcheckpointでexportを保存する。
 
+## 配送の機械検証
+
+`prepare-delivery` → `check-delivery` → 実配送 → `handoff`でGitHubの原文と配送本文を検査する。[詳細](DELIVERY.md)。PythonからGitHub公式REST GETを使用し、MCPの認証を流用しない。候補作成・審査は引き続きネットワーク不要。
+
 ## GitHub MCPの扱い
 
 この版は親や子が環境のGitHub MCPを**直接使う手順**に対応する。別のPython用GitHubトークンは必要ない。接続済みであること、必要なツールが実在すること、子に利用可能なことを各実行で確認する。ChatGPTの接続が別のCodex Cloud環境へ自動的に引き継がれると仮定しない。

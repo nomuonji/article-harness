@@ -10,6 +10,8 @@ from unittest.mock import patch
 import zipfile
 
 from article_harness.native import NativeError, NativeStore
+from article_harness.delivery import DeliveryError
+from test_delivery import FixtureReader
 
 
 class NativeStoreTests(unittest.TestCase):
@@ -98,7 +100,9 @@ class NativeStoreTests(unittest.TestCase):
         self.assertEqual('ready_for_handoff', self.store.authorize_delivery('article', receipt)['status'])
         renewed = dict(receipt, expiresAt=dt.datetime.fromtimestamp(self.now.return_value + 2400, dt.timezone.utc).isoformat())
         self.store.renew_shared_claim('article', renewed)
-        self.assertEqual('handed_off', self.store.handoff('article', submitted['digest'], {'commit_sha': 'b' * 40, 'readback': 'Verified source body at commit'})['status'])
+        reader = FixtureReader()
+        self.store.prepare_delivery('article', reader=reader)
+        self.assertEqual('handed_off', self.store.handoff('article', submitted['digest'], {'commit_sha': 'b' * 40}, reader=reader)['status'])
 
     def test_proposal_delivery_blocks_after_external_claim_expires(self):
         import datetime as dt
@@ -281,9 +285,48 @@ class NativeStoreTests(unittest.TestCase):
             self.store.claim('next', 'next-worker')
         with self.assertRaises(NativeError):
             self.store.handoff('article', submission['digest'], {'commit_sha': 'b' * 40})
-        self.store.handoff('article', submission['digest'], dict(commit_sha='b' * 40,
-                           readback='Parent read back the committed exact candidate bytes.'))
+        reader = FixtureReader()
+        self.store.prepare_delivery('article', reader=reader)
+        self.store.handoff('article', submission['digest'], {'commit_sha': 'b' * 40}, reader=reader)
         self.assertEqual('working', self.store.claim('next', 'next-worker')['status'])
+
+    def test_delivery_prepare_head_race_and_429_leave_other_repositories_runnable(self):
+        submission = self.submitted()
+        lease = self.store.begin_review('article', 'reviewer')
+        self.store.review('article', lease['token'], self.report(submission))
+        reader = FixtureReader()
+        self.store.prepare_delivery('article', reader=reader)
+        reader.current = 'b' * 40
+        with self.assertRaisesRegex(NativeError, 'HEAD moved'):
+            self.store.check_delivery('article', reader=reader)
+        reader.failure = True
+        with self.assertRaises(DeliveryError):
+            self.store.handoff('article', submission['digest'], {'commit_sha': 'b' * 40}, reader=reader)
+        self.assertEqual('ready_for_handoff', self.store.list()[0]['status'])
+        self.add(self.spec('same-repo', files=['docs/next.md'], coordination={'mode': 'proposal-only'}))
+        self.assertEqual('working', self.store.claim('same-repo', 'candidate-worker')['status'])
+        self.add(self.spec('other', repository='owner/other'))
+        self.assertEqual('working', self.store.claim('other', 'another-worker')['status'])
+        reader.failure = False
+        reader.current = 'a' * 40
+        self.assertEqual('a' * 40, self.store.check_delivery('article', reader=reader)['base_sha'])
+
+    def test_head_check_revalidates_claim_after_slow_remote_read(self):
+        import datetime as dt
+        submission = self.submitted(self.spec(coordination={'mode': 'proposal-only'}))
+        lease = self.store.begin_review('article', 'reviewer')
+        self.store.review('article', lease['token'], self.report(submission))
+        receipt = dict(taskId='article', repository='owner/repo', files=['docs/article.md'], runId='actual-run',
+                       expiresAt=dt.datetime.fromtimestamp(self.now.return_value + 10, dt.timezone.utc).isoformat())
+        self.store.authorize_delivery('article', receipt)
+        reader = FixtureReader()
+        self.store.prepare_delivery('article', reader=reader)
+        def slow_head(branch):
+            self.now.return_value += 11
+            return 'a' * 40
+        with patch.object(reader, 'head', side_effect=slow_head):
+            with self.assertRaisesRegex(NativeError, 'expires'):
+                self.store.check_delivery('article', reader=reader)
 
     def test_handoff_rejects_wrong_digest_or_post_review_tampering(self):
         submission = self.submitted()

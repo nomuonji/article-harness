@@ -23,6 +23,8 @@ import time
 import uuid
 import zipfile
 
+from .delivery import DeliveryError, GitHubReader, prepare, verify
+
 
 class NativeError(Exception):
     pass
@@ -213,6 +215,8 @@ class NativeStore:
                 raise NativeError('Only queued tasks may be claimed')
             task = json.loads(row['spec'])
             for other in db.execute("SELECT id,spec,status FROM tasks WHERE id!=? AND status IN ('working','awaiting_review','reviewing','ready_for_handoff','interrupted')", (task_id,)):
+                if task['coordination']['mode'] == 'proposal-only' and other['status'] == 'ready_for_handoff':
+                    continue  # Candidate drafting never writes to the reserved remote repository.
                 if json.loads(other['spec'])['repository'].lower() == task['repository'].lower():
                     raise NativeError(f"Repository is owned by {other['id']} ({other['status']})")
             if row['attempt'] >= task['max_revisions'] + 1:
@@ -394,19 +398,64 @@ class NativeStore:
             db.execute("UPDATE tasks SET status='ready_for_handoff',shared_receipt=?,updated=? WHERE id=?", (_json(receipt), time.time(), task_id))
             return self._public(self._row(db, task_id))
 
-    def handoff(self, task_id, digest, evidence):
+    def _delivery_row(self, db, task_id, digest=None):
+        row = self._row(db, task_id)
+        if row['status'] != 'ready_for_handoff' or (digest is not None and digest != row['digest']):
+            raise NativeError('Only the exact independently reviewed artifact may be handed off')
+        self._verify_snapshot(row)
+        task = json.loads(row['spec'])
+        if task['coordination']['mode'] != 'unmanaged':
+            self._shared(dict(task, coordination={'mode': 'shared-claim'}), json.loads(row['shared_receipt']) if row['shared_receipt'] else None)
+        return row, task
+
+    def prepare_delivery(self, task_id, branch='main', reader=None):
         with self._tx() as db:
-            row = self._row(db, task_id)
-            if row['status'] != 'ready_for_handoff' or digest != row['digest']:
-                raise NativeError('Only the exact independently reviewed artifact may be handed off')
-            self._verify_snapshot(row)
-            task = json.loads(row['spec'])
-            if task['coordination']['mode'] == 'proposal-only':
-                self._shared(dict(task, coordination={'mode': 'shared-claim'}), json.loads(row['shared_receipt']) if row['shared_receipt'] else None)
-            if not isinstance(evidence, dict) or not re.fullmatch(r'[a-fA-F0-9]{40}', evidence.get('commit_sha', '')) or not isinstance(evidence.get('readback'), str) or not evidence['readback'].strip():
-                raise NativeError('Observed commit SHA and actual readback evidence are required')
-            _write(self._task_dir(task_id) / 'handoff.json', _json(dict(evidence, digest=digest, recorded_at=_stamp(), publication='unverified')).encode())
-            db.execute("UPDATE tasks SET status='handed_off',detail=?,updated=? WHERE id=?", (_json(evidence), time.time(), task_id))
+            row, task = self._delivery_row(db, task_id)
+            manifest = self._verify_snapshot(row)
+        plan = prepare(reader or GitHubReader(task['repository']), task, manifest, branch)
+        plan['digest'] = row['digest']
+        with self._tx() as db:
+            self._delivery_row(db, task_id, row['digest'])
+            db.execute('CREATE TABLE IF NOT EXISTS delivery_plans (task_id TEXT PRIMARY KEY, plan TEXT NOT NULL)')
+            db.execute('INSERT OR REPLACE INTO delivery_plans VALUES (?,?)', (task_id, _json(plan)))
+        return plan
+
+    def check_delivery(self, task_id, reader=None):
+        with self._tx() as db:
+            row, task = self._delivery_row(db, task_id)
+            plan = self._delivery_plan(db, task_id, row['digest'])
+        if (reader or GitHubReader(task['repository'])).head(plan['branch']) != plan['base_sha']:
+            raise NativeError('Target HEAD moved; prepare delivery again before writing')
+        with self._tx() as db:
+            self._delivery_row(db, task_id, row['digest'])
+            if self._delivery_plan(db, task_id, row['digest']) != plan:
+                raise NativeError('Delivery plan changed during HEAD check')
+        return plan
+
+    def _delivery_plan(self, db, task_id, digest):
+        table = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delivery_plans'").fetchone()
+        saved = db.execute('SELECT plan FROM delivery_plans WHERE task_id=?', (task_id,)).fetchone() if table else None
+        if saved is None:
+            raise NativeError('Run prepare-delivery before handoff')
+        plan = json.loads(saved['plan'])
+        if plan['digest'] != digest:
+            raise NativeError('Delivery plan is for another reviewed artifact')
+        return plan
+
+    def handoff(self, task_id, digest, evidence, reader=None):
+        with self._tx() as db:
+            row, task = self._delivery_row(db, task_id, digest)
+            manifest = self._verify_snapshot(row)
+            plan = self._delivery_plan(db, task_id, digest)
+        if not isinstance(evidence, dict) or not re.fullmatch(r'[a-f0-9]{40}', evidence.get('commit_sha', '')):
+            raise NativeError('Observed commit SHA is required')
+        observed = verify(reader or GitHubReader(task['repository']), task, manifest, plan, evidence['commit_sha'])
+        with self._tx() as db:
+            self._delivery_row(db, task_id, digest)
+            if self._delivery_plan(db, task_id, digest) != plan:
+                raise NativeError('Delivery plan changed during readback')
+            _write(self._task_dir(task_id) / 'handoff.json', _json(dict(observed, digest=digest, recorded_at=_stamp())).encode())
+            db.execute("UPDATE tasks SET status='handed_off',detail=?,updated=? WHERE id=?", (_json(observed), time.time(), task_id))
             return self._public(self._row(db, task_id))
 
     def export(self, path=None):
@@ -519,6 +568,8 @@ def main(argv=None):
     p = commands.add_parser('resume'); p.add_argument('--id', required=True)
     p = commands.add_parser('renew-shared-claim'); p.add_argument('--id', required=True); p.add_argument('--receipt', required=True)
     p = commands.add_parser('authorize-delivery'); p.add_argument('--id', required=True); p.add_argument('--receipt', required=True)
+    p = commands.add_parser('prepare-delivery'); p.add_argument('--id', required=True); p.add_argument('--branch', default='main')
+    p = commands.add_parser('check-delivery'); p.add_argument('--id', required=True)
     p = commands.add_parser('handoff'); p.add_argument('--id', required=True); p.add_argument('--digest', required=True); p.add_argument('--evidence', required=True)
     commands.add_parser('status')
     p = commands.add_parser('export'); p.add_argument('--output')
@@ -543,13 +594,15 @@ def main(argv=None):
         elif cmd == 'resume': result = store.resume(args.id)
         elif cmd == 'renew-shared-claim': result = store.renew_shared_claim(args.id, load(args.receipt))
         elif cmd == 'authorize-delivery': result = store.authorize_delivery(args.id, load(args.receipt))
+        elif cmd == 'prepare-delivery': result = store.prepare_delivery(args.id, args.branch)
+        elif cmd == 'check-delivery': result = store.check_delivery(args.id)
         elif cmd == 'handoff': result = store.handoff(args.id, args.digest, load(args.evidence))
         elif cmd == 'stop-task': result = store.stop_task(args.id, args.token, args.reason, args.refused)
         elif cmd == 'refuse': result = store.refuse(args.id, args.token, args.reason)
         else: result = store.export(args.output)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    except (NativeError, OSError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
+    except (NativeError, DeliveryError, OSError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
         print(json.dumps({'error': str(error)}, ensure_ascii=False), file=sys.stderr)
         return 1
 
