@@ -1,0 +1,148 @@
+name: article-harness-continuous
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Four bounded attempts per day; each execution can finish and hand off.
+    - cron: '23 */6 * * *'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: article-harness-continuous-qualification-pilot
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    # Opt-in for recurring API-billed executions. Manual dispatch is also allowed.
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ARTICLE_HARNESS_CONTINUOUS_ENABLED == '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      STATE_DIR: ${{ runner.temp }}/article-harness-state
+      SITE_DIR: ${{ github.workspace }}/managed-site
+      MODEL: ${{ vars.ARTICLE_HARNESS_MODEL }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check credential gate
+        id: config
+        env:
+          CODEX_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$CODEX_KEY" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Add OPENAI_API_KEY as a repository secret to use automated Codex execution (API billing applies)."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out pilot site (read-only)
+        if: steps.config.outputs.ready == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: nomuonji/shikaku-wiki
+          path: managed-site
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        if: steps.config.outputs.ready == 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Restore latest verified checkpoint
+        id: restore
+        if: steps.config.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=article-harness-continuous-state&per_page=100" --jq '[.artifacts[] | select(.expired == false and .workflow_run != null)] | sort_by(.created_at) | last | .workflow_run.id // empty')"
+          if [ -n "$RUN_ID" ]; then
+            mkdir -p "$RUNNER_TEMP/prior-state"
+            gh run download "$RUN_ID" --name article-harness-continuous-state --dir "$RUNNER_TEMP/prior-state"
+            python -m article_harness.continuity restore \
+              --state "$STATE_DIR" \
+              --archive "$RUNNER_TEMP/prior-state/checkpoint.tar.gz" \
+              --project qualification-pilot
+          else
+            echo "No previous checkpoint (first clean execution)."
+          fi
+
+      - name: Select never-before-reserved public article sources
+        id: prepare
+        if: steps.restore.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m article_harness.continuity prepare \
+            --project qualification-pilot --state "$STATE_DIR" \
+            --template config/qualification-pilot.json \
+            --repo "$SITE_DIR" --output "$RUNNER_TEMP/project.json" --limit 24
+          COUNT="$(python -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["inventory"]))' "$RUNNER_TEMP/project.json")"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          if [ "$COUNT" -gt 0 ]; then
+            echo "work=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "work=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.prepare.outputs.work == 'true'
+        with:
+          node-version: '22'
+
+      - name: Install standalone Codex runner
+        if: steps.prepare.outputs.work == 'true'
+        run: npm install -g @openai/codex
+
+      - name: Execute bounded Manager / Worker / independent Reviewer cycle
+        id: execute
+        if: steps.prepare.outputs.work == 'true'
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS=(--state "$STATE_DIR")
+          if [ -n "$MODEL" ]; then ARGS+=(--model "$MODEL"); fi
+          python -m article_harness "${ARGS[@]}" run \
+            --project "$RUNNER_TEMP/project.json" \
+            --workers 3 --max-jobs 3 --max-plans 2 \
+            --max-seconds 2700 --agent-timeout 650 --revisions 2
+
+      - name: Write run outcome
+        if: steps.prepare.outcome == 'success'
+        shell: bash
+        run: |
+          python -m article_harness --state "$STATE_DIR" status > "$RUNNER_TEMP/status.json"
+          echo '## Article Harness continuous pilot' >> "$GITHUB_STEP_SUMMARY"
+          echo "Source: nomuonji/shikaku-wiki; project: qualification-pilot" >> "$GITHUB_STEP_SUMMARY"
+          echo "This run creates independently reviewed **proposals**, not published pages." >> "$GITHUB_STEP_SUMMARY"
+          echo "Codex step outcome: ${{ steps.execute.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~json' >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/status.json" >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Atomically checkpoint state for next scheduled invocation
+        if: ${{ always() && steps.restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
+        run: |
+          python -m article_harness.continuity backup \
+            --state "$STATE_DIR" \
+            --archive "$RUNNER_TEMP/checkpoint.tar.gz" \
+            --project qualification-pilot
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && steps.restore.outcome == 'success' && steps.prepare.outcome == 'success' }}
+        with:
+          name: article-harness-continuous-state
+          path: ${{ runner.temp }}/checkpoint.tar.gz
+          retention-days: 30
+          if-no-files-found: error
