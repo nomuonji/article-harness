@@ -76,6 +76,8 @@ def supervise(*, template: Path, repo: Path, state: Path, runner: str = 'codex',
             and (max_cycles is None or max_cycles > 0)):
         raise ContinuityError('Invalid local supervisor bounds')
     template, repo, state = template.resolve(), repo.resolve(), state.resolve()
+    if state == repo or repo in state.parents:
+        raise ContinuityError('Persistent state must be outside the article repository')
     if not template.is_file():
         raise ContinuityError('Project template is missing')
     settings = json.loads(template.read_text(encoding='utf-8'))
