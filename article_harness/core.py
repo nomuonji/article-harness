@@ -84,8 +84,8 @@ def validate_task(task):
             raise HarnessError(f'Symlink component in source: {name}')
         git(repo, 'ls-files', '--error-unmatch', '--', name)
     coordination = task.get('coordination', {})
-    if coordination.get('mode') not in ('unmanaged', 'external-reservation'):
-        raise HarnessError('Explicit coordination mode required: unmanaged or external-reservation')
+    if coordination.get('mode') not in ('unmanaged', 'external-reservation', 'proposal-only'):
+        raise HarnessError('Explicit coordination mode required: unmanaged, external-reservation, or proposal-only')
     if coordination['mode'] == 'external-reservation':
         command = coordination.get('command')
         if not isinstance(command, list) or not command or any(not isinstance(x, str) or not x for x in command):
@@ -155,7 +155,7 @@ class Reservation:
 
     def call(self, operation):
         cfg = self.task['coordination']
-        if cfg['mode'] == 'unmanaged':
+        if cfg['mode'] in ('unmanaged', 'proposal-only'):
             return
         if operation == 'claim' and self.receipt:
             operation = 'renew'  # Reconcile an existing durable lease, never claim twice.
@@ -315,8 +315,9 @@ class Controller:
                             'reviewed_sha256': {name: hashlib.sha256((worktree / name).read_bytes()).hexdigest() for name in changed},
                             'worker_evidence': output['evidence'], 'reservation': reservation.receipt,
                             'source_checks': ['allowlist', 'unchanged HEAD', 'regular UTF-8 files', 'git diff --check', 'git apply --check'],
-                            'build': 'not_run', 'publication': 'not_run', 'status': 'ready_for_handoff'})
-                        self.store.update(task['id'], 'ready_for_handoff', str(patch_path))
+                            'build': 'not_run', 'publication': 'not_run',
+                             'status': 'reviewed_proposal' if task['coordination']['mode'] == 'proposal-only' else 'ready_for_handoff'})
+                        self.store.update(task['id'], 'reviewed_proposal' if task['coordination']['mode'] == 'proposal-only' else 'ready_for_handoff', str(patch_path))
                         return
                     feedback.append(review)
                     atomic_json(feedback_file, feedback)
