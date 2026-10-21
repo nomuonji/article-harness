@@ -14,6 +14,7 @@ import os
 from pathlib import Path, PurePosixPath
 import shutil
 import sqlite3
+import subprocess
 import tarfile
 import tempfile
 
@@ -139,20 +140,85 @@ def restore(archive: Path, state: Path, project: str) -> dict:
     return {'files': len(items), 'bytes': total, 'state': str(state)}
 
 
+def prepare_project(template: Path, repo: Path, state: Path, output: Path,
+                    identity: str, limit: int = 24) -> dict:
+    """Select a bounded, reproducible frontier of untouched tracked article files."""
+    import fnmatch
+    import subprocess
+    from .core import Store
+
+    data = json.loads(template.read_text(encoding='utf-8'))
+    if (not identity or identity != data.get('id')
+            or data.get('coordination') != {'mode': 'proposal-only'}):
+        raise ContinuityError('Project identity or proposal-only coordination mismatch')
+    if not isinstance(limit, int) or not 1 <= limit <= 60:
+        raise ContinuityError('Inventory limit must be between 1 and 60')
+    repo = repo.resolve()
+    if not repo.is_dir() or not (repo / '.git').exists():
+        raise ContinuityError('Target must be an existing Git checkout')
+    paths = subprocess.check_output(['git', '-C', str(repo), 'ls-files', '-z'],
+                                    timeout=30).decode('utf-8').split('\\0')
+    patterns = data.get('article_globs')
+    if not isinstance(patterns, list) or not patterns or any(
+            not isinstance(p, str) or not p.startswith('docs/') for p in patterns):
+        raise ContinuityError('Bounded docs/ article_globs required')
+    busy = set()
+    for row in Store(state).rows():
+        task = json.loads(row['spec'])
+        if task.get('repo') == str(repo) and row['status'] != 'applied':
+            busy.update(task.get('files', []))
+    eligible = []
+    for path in paths:
+        if (path in busy or not path.endswith(('.md', '.mdx'))
+                or not any(fnmatch.fnmatchcase(path, p) for p in patterns)):
+            continue
+        original = repo / path
+        if (not original.is_file() or original.is_symlink()
+                or original.resolve() != original):
+            continue
+        eligible.append(path)
+    # Stable spread across topics instead of repeatedly concentrating on
+    # alphabetically early directories.
+    eligible.sort(key=lambda path: hashlib.sha256(
+        (identity + ':' + path).encode('utf-8')).hexdigest())
+    inventory = eligible[:limit]
+    project = {k: data[k] for k in ('brief', 'sources', 'policy_files', 'coordination')}
+    project['repo'] = str(repo)
+    project['inventory'] = inventory
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(project, ensure_ascii=False, indent=2), encoding='utf-8')
+    return {'eligible': len(eligible), 'selected': len(inventory),
+            'previously_reserved': len(busy), 'project': identity}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description='Checkpoint/restore the one-runner Article Harness queue')
-    parser.add_argument('command', choices=['backup', 'restore'])
+    parser.add_argument('command', choices=['backup', 'restore', 'prepare'])
     parser.add_argument('--state', type=Path, required=True)
-    parser.add_argument('--archive', type=Path, required=True)
+    parser.add_argument('--archive', type=Path)
     parser.add_argument('--project', required=True)
+    parser.add_argument('--template', type=Path)
+    parser.add_argument('--repo', type=Path)
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--limit', type=int, default=24)
     args = parser.parse_args(argv)
     try:
-        fn = backup if args.command == 'backup' else restore
-        print(json.dumps(fn(args.state if args.command == 'backup' else args.archive,
-                            args.archive if args.command == 'backup' else args.state,
-                            args.project), ensure_ascii=False))
+        if args.command == 'prepare':
+            if not args.template or not args.repo or not args.output:
+                raise ContinuityError('prepare requires --template, --repo, --output')
+            result = prepare_project(args.template, args.repo, args.state,
+                                     args.output, args.project, args.limit)
+        else:
+            if not args.archive:
+                raise ContinuityError('backup/restore require --archive')
+            fn = backup if args.command == 'backup' else restore
+            result = fn(args.state if args.command == 'backup' else args.archive,
+                        args.archive if args.command == 'backup' else args.state,
+                        args.project)
+        print(json.dumps(result, ensure_ascii=False))
         return 0
-    except (ContinuityError, OSError, ValueError, tarfile.TarError, sqlite3.Error) as error:
+    except (ContinuityError, OSError, ValueError, tarfile.TarError, sqlite3.Error,
+            subprocess.CalledProcessError) as error:
         parser.exit(status=1, message=f'Checkpoint blocked: {error}\n')
 
 
