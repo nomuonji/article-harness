@@ -159,9 +159,14 @@ def prepare_project(template: Path, repo: Path, state: Path, output: Path,
     paths = subprocess.check_output(['git', '-C', str(repo), 'ls-files', '-z'],
                                     timeout=30).decode('utf-8').split('\0')
     patterns = data.get('article_globs')
-    if not isinstance(patterns, list) or not patterns or any(
-            not isinstance(p, str) or not p.startswith('docs/') for p in patterns):
-        raise ContinuityError('Bounded docs/ article_globs required')
+    # The user explicitly selects a content subtree. Do not sweep repository
+    # roots (e.g. "*") or GitHub/workflow/policy files by accident.
+    if (not isinstance(patterns, list) or not patterns or any(
+            not isinstance(p, str) or '/' not in p or p.startswith(('/', '.'))
+            or '\\\\' in p or '..' in p.split('/')
+            or p.split('/')[0].startswith(('*', '?', '['))
+            for p in patterns)):
+        raise ContinuityError('article_globs must specify an explicit content directory')
     busy = set()
     for row in Store(state).rows():
         task = json.loads(row['spec'])
