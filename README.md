@@ -1,5 +1,19 @@
 # Article Harness 0.2
 
+## ローカル継続運転（Windows 11 / WSL）
+
+既存のCodex CLIログインを利用し、APIキーなしで改稿・独立審査を連続実行できます。
+stateをWSLに永続保存して次の起動に引き継ぎ、Windows PowerShellからも起動可能です。
+まずは資格図鑑の proposal-only 試験モード。管理下サイトへの本番配送は未接続。
+
+~~~bash
+bash scripts/run-local.sh --repo "$HOME/shikaku-wiki" --state "$HOME/.local/state/article-harness/shikaku-pilot" --dry-run
+bash scripts/run-local.sh --repo "$HOME/shikaku-wiki" --state "$HOME/.local/state/article-harness/shikaku-pilot" --once
+bash scripts/run-local.sh --repo "$HOME/shikaku-wiki" --state "$HOME/.local/state/article-harness/shikaku-pilot"
+~~~
+
+詳しい手順： [ローカル継続運転](docs/LOCAL.md)
+
 ## 継続運転（GitHub Actions・試験版）
 
 6時間ごとの再起動、記事候補の自動選定、改稿・独立審査、状態の安全な保存と復元を実装した。
