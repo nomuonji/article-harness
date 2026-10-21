@@ -1,0 +1,22 @@
+{
+  "id": "qualification-pilot",
+  "repository": "nomuonji/shikaku-wiki",
+  "article_globs": [
+    "docs/technology/General/*.md",
+    "docs/technology/General/*.mdx",
+    "docs/business/Finance/*.md"
+  ],
+  "brief": "既存資格記事の事実・資格区分・受験対象・費用・取得後の用途を一次資料と比較し、実際の読者が資格を選ぶための不足情報がある記事のみ限定改稿する。無理な文字数増加、検索語だけの量産、無根拠な統計、URL変更はしない。情報更新日は原典と照合し、公表主体・受験要件等を検証する。",
+  "sources": [
+    "https://www.ipa.go.jp/shiken/",
+    "https://aws.amazon.com/certification/",
+    "https://www.cisco.com/site/us/en/learn/training-certifications/certifications/index.html"
+  ],
+  "policy_files": [
+    "AGENT.md",
+    "SEO_ARTICLE_CHECKLIST.md"
+  ],
+  "coordination": {
+    "mode": "proposal-only"
+  }
+}
