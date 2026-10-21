@@ -157,7 +157,7 @@ def prepare_project(template: Path, repo: Path, state: Path, output: Path,
     if not repo.is_dir() or not (repo / '.git').exists():
         raise ContinuityError('Target must be an existing Git checkout')
     paths = subprocess.check_output(['git', '-C', str(repo), 'ls-files', '-z'],
-                                    timeout=30).decode('utf-8').split('\\0')
+                                    timeout=30).decode('utf-8').split('\0')
     patterns = data.get('article_globs')
     if not isinstance(patterns, list) or not patterns or any(
             not isinstance(p, str) or not p.startswith('docs/') for p in patterns):
