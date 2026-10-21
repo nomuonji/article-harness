@@ -11,7 +11,7 @@ description: ChatGPT WorkまたはクラウドCodexで、親がネイティブ�
 
 1. ユーザーの会話起動指示に従った後、通常の実行はGitHub/checkoutの対象repo・編集方針と、このrepoの`skills/editorial-quality.md`を読む。My Portalは案内/任意更新に限り、スキル/設定/キューを記事ごとに取得しない。My Portalが429でも取得済み正本と同梱スキルで計画・改稿・審査を続ける。
 2. Python3、ネイティブsubagent起動/結果受取/追加指示、GitHub readbackまたはcheckoutの実在を確認する。`codex exec`や別のAPIキーを前提にしない。この会話のGitHub/MCP接続が別環境にもあると仮定しない。
-3. repoをcheckoutできるならそのまま使用する。GitHub MCPしかない場合は、default branchの正確なHEADを読み、同じSHAから`article_harness/__init__.py`と`article_harness/native.py`を取得して一つのruntimeディレクトリへ置く。取得したblob SHAとローカルbytesのGit blob SHAを照合してから実行する。利用不能ならAPI非公開エンドポイントなどを探さず、必要な能力を報告する。
+3. repoをcheckoutできるならそのまま使用する。GitHub MCPしかない場合は、default branchの正確なHEADを読み、同じSHAから`article_harness/__init__.py`、`article_harness/native.py`、`article_harness/delivery.py`を取得して一つのruntimeディレクトリへ置く。取得したblob SHAとローカルbytesのGit blob SHAを照合してから実行する。利用不能ならAPI非公開エンドポイントなどを探さず、必要な能力を報告する。
 4. 一つの実行に一つのSTATEディレクトリを用意し、予算を宣言する。既定は3Worker枠、対象候補最大12件、初回+修正2回。これは公開ノルマではない。ツール/時間の実上限に合わせ、品質を下げて数を達成しない。
 5. 既定はOperator不要の候補作成モード。Site/Keywords Operatorのcontext、計測、Task一覧を起動前の必須条件にしない。GitHub本文と原典から独立して計画し、管理状況が不明または既存定期Workerの対象なら`coordination.mode=proposal-only`で候補だけ作る。既存スケジュールを変更せず、実サイト配送時だけ実共有claimと正本の現行配送契約を確認する。
 
@@ -38,8 +38,9 @@ description: ChatGPT WorkまたはクラウドCodexで、親がネイティブ�
 ## 引き渡し・継続・終了
 
 17. proposal-onlyのpassは`reviewed_proposal`で、外部配送はまだ許可されない。親が管理下repoへ実配送する時だけ、正本の共有claimと現在HEAD/本文を確認する。観測したTask/claimとローカルTaskの対応を記録し、`taskId, repository, files, runId, expiresAt`に正規化した実receiptを`native authorize-delivery --id TASK --receipt FILE`へ渡す。別Task IDの対応や元の正本IDを隠さず記録する。成功後はready_for_handoffとなり、現行配送契約に従う。元HEAD/条件が変われば再診断/再審査する。取得不能なら候補を保存し配送だけ保留する。
-18. 実際に配送したcommit SHAとreadback根拠を`native handoff --id TASK --digest DIGEST --evidence FILE`へ記録する。入力形式は`{"commit_sha":"40桁の観測済SHA","readback":"確認したtree/body/commit等の根拠"}`。helperはGitHubを自動照会しないので、架空の証跡で埋めない。CI・公開・検索成果は別に報告する。
-19. 空き枠へ次の候補を投入し、1件の保留で全体を止めない。reviewed_proposalは同repoの別記事を妨げない。共有claim取得後のready_for_handoffは引渡しまでrepo排他を維持する。Keyword探索や計測は具体的に必要な時だけ親がまとめて依頼し、各Workerの定例処理へ入れない。結果連携も必要な最終要約だけで、全中間状態はSQLiteと固定成果物に保存する。
+18. 配送前に`native prepare-delivery --id TASK --branch main`を実行する。helperがGitHubの公開REST APIをread-onlyで照会し、同じ記事を触るopen PR、元commit/現行原文の一致を検査する。別記事だけのHEAD更新は保持して準備する。返された`base_sha`を唯一のparent、`base_tree_sha`を基底treeとして、固定snapshotの許可ファイルだけを既存modeのまま配送する。書込直前に`native check-delivery --id TASK`を通す。HEAD更新ならprepareからやり直し、対象本文更新なら再診断・再審査する。GitHub書込は環境の既存MCP/現行Actions契約に従う。refの強制更新は禁止。管理下のmainを直接更新する経路を新設しない。
+   配送commitを作成後、`native handoff --id TASK --digest DIGEST --evidence FILE`（`{"commit_sha":"実際の40桁SHA"}`）を実行する。helperがGitHubからcommit・parent・完全tree・全対象blobを取得し、変更ファイル・mode・本文が審査済snapshotと一致した時だけhanded_offにする。自由記述readbackは証明にならない。これは配送commitの照合であり、PR作成・マージ・CI・本番公開は別々に確認する。GitHub GET不能/429/権限不足でも完了を偽装せず配送だけ保留する。公開repoのGETにキーは不要。非公開repoは環境に既にあるGH_TOKEN/GITHUB_TOKENを使用できるが、MCP認証がPythonへ引継がれると仮定しない。
+19. 空き枠へ次の候補を投入し、1件の保留で全体を止めない。reviewed_proposalは同repoの別記事を妨げない。共有claim取得後のready_for_handoffは別の配送を排他するが、同repoの別記事のproposal-only候補作成は継続できる。Keyword探索や計測は具体的に必要な時だけ親がまとめて依頼し、各Workerの定例処理へ入れない。結果連携も必要な最終要約だけで、全中間状態はSQLiteと固定成果物に保存する。
 20. 中断Taskは勝手にclaimし直さず、実agentの停止・候補・共有claimを確認して`native resume --id TASK`。helperは期限切れをinterruptedにし、明示再開を要求する。拒否Taskはresume不可。
 21. 重要checkpointと終了時に`native export --output OUTSIDE_STATE.zip`。機密を含めずユーザーの永続保存先へ保存し、既存checkpointなら同じidentityへ置換する。次回は空のSTATEへ`native restore --archive FILE.zip`。working/reviewing leaseは再利用されずinterruptedとなる。**このアーカイブは分散ロックではない**。複数チャット間は実共有claimで協調する。
 22. 最終報告は実際の改稿・審査合格・配送・CI・公開を分け、保留理由と再開先を示す。1回の実行が終了した後の自動再起動や無制限常駐を保証しない。
